@@ -7,7 +7,10 @@ source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
 
 # Critical core library requirements
-requirements = python3, kivy, requests
+requirements = python3, kivy, requests, yt-dlp, hostpython3
+
+# This forces the builder to use raw python source packaging for the backend components
+android.pip_dependencies = requests yt-dlp
 
 orientation = portrait
 fullscreen = 0
