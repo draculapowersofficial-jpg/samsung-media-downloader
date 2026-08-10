@@ -1,129 +1,150 @@
 import os
-import sys
 import re
 import datetime
 import threading
-
-# --- THE MAGIC TRICK: Auto-bundle pure dependencies inside Android storage ---
-import subprocess
-try:
-    import requests
-    import yt_dlp
-except ImportError:
-    # If the app boots and doesn't find them, it forces a quick local install into its own folder
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--target", os.path.dirname(__file__), "requests", "yt-dlp"])
-    import requests
-    import yt_dlp
-
-from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
-from kivy.uix.spinner import Spinner
-from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
-from kivy.clock import Clock
-from kivy.utils import get_color_from_hex
-from kivy.core.window import Window
+from flask import Flask, render_template_string, request, jsonify
+import requests
+import yt_dlp
 
 DOWNLOAD_DIR = "/sdcard/Download/MyDownloader"
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
-class ModernDownloaderApp(App):
-    def build(self):
-        self.title = "Media Downloader Pro"
-        
-        self.bg_dark = get_color_from_hex('#121212')      
-        self.bg_card = get_color_from_hex('#1E1E1E')      
-        self.accent_purple = get_color_from_hex('#6200EE')  
-        self.text_white = get_color_from_hex('#FFFFFF')   
-        self.text_dim = get_color_from_hex('#A0A0A0')     
+app = Flask(__name__)
+status_message = "Ready to download..."
 
-        Window.clearcolor = self.bg_dark
-        main_layout = BoxLayout(orientation='vertical', padding=15, spacing=15)
+# Clean Premium Dark Mode HTML/CSS Interface
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media Downloader Pro</title>
+    <style>
+        body { background-color: #121212; color: #FFFFFF; font-family: Helvetica, Arial, sans-serif; padding: 20px; text-align: center; }
+        .container { max-width: 450px; margin: 0 auto; background: #1E1E1E; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        h1 { font-size: 24px; margin-bottom: 20px; color: #FFFFFF; }
+        input, select, button { width: 100%; padding: 12px; margin: 10px 0; border-radius: 4px; border: none; font-size: 16px; box-sizing: border-box; }
+        input, select { background-color: #2D2D2D; color: #FFFFFF; }
+        button { background-color: #6200EE; color: white; font-weight: bold; cursor: pointer; }
+        button:hover { background-color: #3700B3; }
+        .status { margin-top: 20px; color: #A0A0A0; font-style: italic; }
+        .tab-btn { width: 48%; display: inline-block; background-color: #2D2D2D; margin: 5px 1%; }
+        .active-tab { background-color: #6200EE; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Media Downloader Pro</h1>
+        <div style="margin-bottom: 20px;">
+            <button class="tab-btn active-tab" id="btn-single" onclick="showTab('single')">Single Link</button>
+            <button class="tab-btn" id="btn-batch" onclick="showTab('batch')">Batch Mode</button>
+        </div>
 
-        title_lbl = Label(text="Media Downloader Pro", font_size='22sp', bold=True, color=self.text_white, size_hint_y=None, height=40)
-        main_layout.add_widget(title_lbl)
+        <div id="single-view">
+            <input type="text" id="url" placeholder="Paste your media link here...">
+            <select id="type">
+                <option value="Video">Video</option>
+                <option value="Audio">Audio</option>
+            </select>
+            <button onclick="startDownload()">DOWNLOAD NOW</button>
+        </div>
 
-        self.tabs = TabbedPanel(do_default_tab=False, background_color=self.bg_card)
-        
-        # --- Single Tab ---
-        self.tab_single = TabbedPanelItem(text="Single Link", background_color=self.bg_dark)
-        single_box = BoxLayout(orientation='vertical', padding=10, spacing=12)
-        single_box.add_widget(Label(text="Paste Media URL below:", color=self.text_dim, size_hint_y=None, height=25))
-        
-        self.url_input = TextInput(multiline=False, hint_text="Paste your link here...", background_color=self.bg_card, foreground_color=self.text_white, hint_text_color=self.text_dim, size_hint_y=None, height=45)
-        single_box.add_widget(self.url_input)
-        
-        self.type_spinner = Spinner(text="Video", values=("Video", "Audio"), background_color=self.accent_purple, size_hint_y=None, height=45)
-        single_box.add_widget(self.type_spinner)
-        
-        download_btn = Button(text="START DOWNLOAD", background_color=self.accent_purple, bold=True, size_hint_y=None, height=50)
-        download_btn.bind(on_press=self.start_single_download)
-        single_box.add_widget(download_btn)
-        single_box.add_widget(BoxLayout()) 
-        self.tab_single.add_widget(single_box)
-        
-        # --- Batch Tab ---
-        self.tab_batch = TabbedPanelItem(text="Batch Mode", background_color=self.bg_dark)
-        batch_box = BoxLayout(orientation='vertical', padding=10, spacing=12)
-        batch_box.add_widget(Label(text="Reads 'links.txt' from your Downloads folder", color=self.text_dim, font_size='14sp'))
-        
-        batch_btn = Button(text="RUN BATCH FILE", background_color=self.accent_purple, bold=True, size_hint_y=None, height=50)
-        batch_btn.bind(on_press=self.start_batch_download)
-        batch_box.add_widget(batch_btn)
-        batch_box.add_widget(BoxLayout()) 
-        self.tab_batch.add_widget(batch_box)
+        <div id="batch-view" style="display:none;">
+            <p style="color: #A0A0A0; font-size: 14px;">Place a file named 'links.txt' in your Download folder with one link per line.</p>
+            <button onclick="startBatch()">RUN BATCH FILE</button>
+        </div>
 
-        self.tabs.add_widget(self.tab_single)
-        self.tabs.add_widget(self.tab_batch)
-        main_layout.add_widget(self.tabs)
+        <div class="status" id="status-box">Status: Ready.</div>
+    </div>
 
-        status_box = BoxLayout(orientation='vertical', padding=10, spacing=5, size_hint_y=None, height=80)
-        self.status_lbl = Label(text="Ready.", color=self.text_dim, font_size='14sp')
-        status_box.add_widget(self.status_lbl)
-        
-        main_layout.add_widget(status_box)
-        return main_layout
-
-    def update_status(self, text):
-        Clock.schedule_once(lambda dt: setattr(self.status_lbl, 'text', text))
-
-    def start_single_download(self, instance):
-        url = self.url_input.text.strip()
-        if url:
-            threading.Thread(target=self.download_ytdl, args=(url, self.type_spinner.text), daemon=True).start()
-
-    def start_batch_download(self, instance):
-        batch_file = os.path.join(DOWNLOAD_DIR, "links.txt")
-        if os.path.exists(batch_file):
-            with open(batch_file, 'r') as f:
-                urls = [line.strip() for line in f if line.strip()]
-            threading.Thread(target=self.process_batch, args=(urls,), daemon=True).start()
-        else:
-            self.update_status("Error: links.txt not found in MyDownloader folder.")
-
-    def download_ytdl(self, url, media_type):
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.update_status("Downloading...")
-        ydl_opts = {
-            'outtmpl': f'{DOWNLOAD_DIR}/%(title)s_{timestamp}.%(ext)s',
-            'quiet': True
+    <script>
+        function showTab(type) {
+            if(type === 'single') {
+                document.getElementById('single-view').style.display = 'block';
+                document.getElementById('batch-view').style.display = 'none';
+                document.getElementById('btn-single').classList.add('active-tab');
+                document.getElementById('btn-batch').classList.remove('active-tab');
+            } else {
+                document.getElementById('single-view').style.display = 'none';
+                document.getElementById('batch-view').style.display = 'block';
+                document.getElementById('btn-single').classList.remove('active-tab');
+                document.getElementById('btn-batch').classList.add('active-tab');
+            }
         }
-        if media_type == "Audio":
-            ydl_opts.update({'format': 'bestaudio/best'})
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            self.update_status("✅ Download complete!")
-        except Exception:
-            self.update_status("❌ Extraction failed.")
+        function startDownload() {
+            let url = document.getElementById('url').value;
+            let type = document.getElementById('type').value;
+            document.getElementById('status-box').innerText = "Status: Initializing connection...";
+            fetch('/download?url=' + encodeURIComponent(url) + '&type=' + type)
+                .then(res => res.json())
+                .then(data => alert(data.message));
+        }
+        function startBatch() {
+            document.getElementById('status-box').innerText = "Status: Starting batch processing...";
+            fetch('/batch')
+                .then(res => res.json())
+                .then(data => alert(data.message));
+        }
+        setInterval(() => {
+            fetch('/status').then(res => res.json()).then(data => {
+                document.getElementById('status-box').innerText = "Status: " + data.status;
+            });
+        }, 2000);
+    </script>
+</body>
+</html>
+"""
 
-    def process_batch(self, urls):
-        for url in urls:
-            self.download_ytdl(url, "Video")
-        self.update_status("✅ Batch processing finished!")
+@app.route('/')
+def home():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/status')
+def get_status():
+    global status_message
+    return jsonify({"status": status_message})
+
+@app.route('/download')
+def download():
+    url = request.args.get('url')
+    media_type = request.args.get('type')
+    threading.Thread(target=process_ytdl, args=(url, media_type), daemon=True).start()
+    return jsonify({"message": "Download thread started in background!"})
+
+@app.route('/batch')
+def batch():
+    batch_file = os.path.join(DOWNLOAD_DIR, "links.txt")
+    if os.path.exists(batch_file):
+        with open(batch_file, 'r') as f:
+            urls = [line.strip() for line in f if line.strip()]
+        threading.Thread(target=process_batch, args=(urls,), daemon=True).start()
+        return jsonify({"message": "Batch sequence initiated!"})
+    return jsonify({"message": "Error: links.txt file not found."})
+
+def process_ytdl(url, media_type):
+    global status_message
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    status_message = "Downloading..."
+    ydl_opts = {'outtmpl': f'{DOWNLOAD_DIR}/%(title)s_{timestamp}.%(ext)s', 'quiet': True}
+    if media_type == "Audio":
+        ydl_opts.update({'format': 'bestaudio/best'})
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        status_message = "✅ Download complete!"
+    except Exception:
+        status_message = "❌ Extraction failed."
+
+def process_batch(urls):
+    global status_message
+    for url in urls:
+        process_ytdl(url, "Video")
+    status_message = "✅ Batch layout tasks complete!"
 
 if __name__ == '__main__':
-    ModernDownloaderApp().run()
+    # Starts an internal web app on boot that hooks into standard Android ports
+    import webbrowser
+    threading.Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
+    app.run(host='127.0.0.1', port=5000)
