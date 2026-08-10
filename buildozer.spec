@@ -6,18 +6,12 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
 
-# Critical core library requirements
-requirequirements = python3, kivy, hostpython3
-
-
-# This forces the builder to use raw python source packaging for the backend components 
+requirements = python3, kivy, hostpython3
 android.pip_dependencies = requests yt-dlp
-
 
 orientation = portrait
 fullscreen = 0
 
-# Android specific configurations
 android.permissions = INTERNET, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
 android.api = 33
 android.minapi = 21
