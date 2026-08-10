@@ -7,7 +7,7 @@ source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
 
 # Critical core library requirements
-requirements = python3, requests, yt-dlp
+requirements = python3, kivy, requests, yt-dlp
 
 orientation = portrait
 fullscreen = 0
