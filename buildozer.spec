@@ -6,8 +6,8 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
 
-requirements = python3, kivy, hostpython3
-android.pip_dependencies = requests yt-dlp
+# Explicitly maps python3 and core mobile graphics frameworks
+requirements = python3, kivy==2.3.0, hostpython3, requests, yt-dlp
 
 orientation = portrait
 fullscreen = 0
