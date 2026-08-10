@@ -1,20 +1,30 @@
 import os
+import sys
 import re
 import datetime
 import threading
+
+# --- THE MAGIC TRICK: Auto-bundle pure dependencies inside Android storage ---
+import subprocess
+try:
+    import requests
+    import yt_dlp
+except ImportError:
+    # If the app boots and doesn't find them, it forces a quick local install into its own folder
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--target", os.path.dirname(__file__), "requests", "yt-dlp"])
+    import requests
+    import yt_dlp
+
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.spinner import Spinner
-from kivy.uix.progressbar import ProgressBar
 from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 from kivy.clock import Clock
 from kivy.utils import get_color_from_hex
 from kivy.core.window import Window
-import requests
-import yt_dlp
 
 DOWNLOAD_DIR = "/sdcard/Download/MyDownloader"
 if not os.path.exists(DOWNLOAD_DIR):
