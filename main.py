@@ -2,133 +2,118 @@ import os
 import re
 import datetime
 import threading
-import tkinter as tk
-from tkinter import messagebox, filedialog
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.spinner import Spinner
+from kivy.uix.progressbar import ProgressBar
+from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
+from kivy.clock import Clock
+from kivy.utils import get_color_from_hex
+from kivy.core.window import Window
 import requests
 import yt_dlp
 
-# --- Optimized for Android Pydroid 3 (Stable) ---
 DOWNLOAD_DIR = "/sdcard/Download/MyDownloader"
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
-class MobileDownloaderApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Media Downloader Pro")
-        self.root.geometry("450x670")
+class ModernDownloaderApp(App):
+    def build(self):
+        self.title = "Media Downloader Pro"
         
-        # --- Stable Dark Mode Colors ---
-        self.bg_dark = "#121212"       
-        self.bg_card = "#1E1E1E"       
-        self.accent_purple = "#6200EE" 
-        self.text_white = "#FFFFFF"    
-        self.text_dim = "#A0A0A0"      
+        self.bg_dark = get_color_from_hex('#121212')      
+        self.bg_card = get_color_from_hex('#1E1E1E')      
+        self.accent_purple = get_color_from_hex('#6200EE')  
+        self.text_white = get_color_from_hex('#FFFFFF')   
+        self.text_dim = get_color_from_hex('#A0A0A0')     
+
+        Window.clearcolor = self.bg_dark
+        main_layout = BoxLayout(orientation='vertical', padding=15, spacing=15)
+
+        title_lbl = Label(text="Media Downloader Pro", font_size='22sp', bold=True, color=self.text_white, size_hint_y=None, height=40)
+        main_layout.add_widget(title_lbl)
+
+        self.tabs = TabbedPanel(do_default_tab=False, background_color=self.bg_card)
         
-        self.root.configure(bg=self.bg_dark)
-        self.create_widgets()
+        # --- Single Tab ---
+        self.tab_single = TabbedPanelItem(text="Single Link", background_color=self.bg_dark)
+        single_box = BoxLayout(orientation='vertical', padding=10, spacing=12)
+        single_box.add_widget(Label(text="Paste Media URL below:", color=self.text_dim, size_hint_y=None, height=25))
         
-    def create_widgets(self):
-        # UI Setup using basic Tkinter to prevent native graphic crashes
-        tk.Label(self.root, text="Media Downloader Pro", font=("Helvetica", 18, "bold"), bg=self.bg_dark, fg=self.text_white).pack(pady=20)
+        self.url_input = TextInput(multiline=False, hint_text="Paste your link here...", background_color=self.bg_card, foreground_color=self.text_white, hint_text_color=self.text_dim, size_hint_y=None, height=45)
+        single_box.add_widget(self.url_input)
         
-        # Tab bar (Simulated with Frame)
-        self.tab_bar = tk.Frame(self.root, bg=self.bg_card)
-        self.tab_bar.pack(fill="x", padx=15, pady=5)
+        self.type_spinner = Spinner(text="Video", values=("Video", "Audio"), background_color=self.accent_purple, size_hint_y=None, height=45)
+        single_box.add_widget(self.type_spinner)
         
-        # Action Buttons
-        self.btn_single = tk.Button(self.tab_bar, text="Single Link", bg=self.accent_purple, fg=self.text_white, bd=0, command=self.show_single_view)
-        self.btn_single.pack(side="left", fill="x", expand=True)
+        download_btn = Button(text="START DOWNLOAD", background_color=self.accent_purple, bold=True, size_hint_y=None, height=50)
+        download_btn.bind(on_press=self.start_single_download)
+        single_box.add_widget(download_btn)
+        single_box.add_widget(BoxLayout()) 
+        self.tab_single.add_widget(single_box)
         
-        self.btn_batch = tk.Button(self.tab_bar, text="Batch Mode", bg=self.bg_card, fg=self.text_dim, bd=0, command=self.show_batch_view)
-        self.btn_batch.pack(side="right", fill="x", expand=True)
-
-        self.view_container = tk.Frame(self.root, bg=self.bg_dark)
-        self.view_container.pack(fill="both", expand=True, padx=15, pady=10)
-
-        # Panes
-        self.single_view = tk.Frame(self.view_container, bg=self.bg_dark)
-        self.batch_view = tk.Frame(self.view_container, bg=self.bg_dark)
-        text="View Downloads Folder"
-        self.build_single_layout()
-        self.build_batch_layout()
-        self.show_single_view()
-
-        # Status Footer
-        progress_frame = tk.LabelFrame(self.root, text=" Download Status ", bg=self.bg_dark, fg=self.text_white)
-        progress_frame.pack(fill="x", padx=15, pady=15)
+        # --- Batch Tab ---
+        self.tab_batch = TabbedPanelItem(text="Batch Mode", background_color=self.bg_dark)
+        batch_box = BoxLayout(orientation='vertical', padding=10, spacing=12)
+        batch_box.add_widget(Label(text="Reads 'links.txt' from your Downloads folder", color=self.text_dim, font_size='14sp'))
         
-        self.status_lbl = tk.Label(progress_frame, text="Ready...", bg=self.bg_dark, fg=self.text_dim)
-        self.status_lbl.pack(pady=10)
+        batch_btn = Button(text="RUN BATCH FILE", background_color=self.accent_purple, bold=True, size_hint_y=None, height=50)
+        batch_btn.bind(on_press=self.start_batch_download)
+        batch_box.add_widget(batch_btn)
+        batch_box.add_widget(BoxLayout()) 
+        self.tab_batch.add_widget(batch_box)
+
+        self.tabs.add_widget(self.tab_single)
+        self.tabs.add_widget(self.tab_batch)
+        main_layout.add_widget(self.tabs)
+
+        status_box = BoxLayout(orientation='vertical', padding=10, spacing=5, size_hint_y=None, height=80)
+        self.status_lbl = Label(text="Ready.", color=self.text_dim, font_size='14sp')
+        status_box.add_widget(self.status_lbl)
         
-        # Storage Location
-        tk.Button(self.root, text="📁 View Downloads", bg=self.accent_purple, fg=self.text_white, bd=0, command=self.show_file_location).pack(pady=10, padx=15, fill="x")
+        main_layout.add_widget(status_box)
+        return main_layout
 
-    def build_single_layout(self):
-        tk.Label(self.single_view, text="URL:", bg=self.bg_dark, fg=self.text_white).pack(anchor="w")
-        self.url_entry = tk.Entry(self.single_view, bg=self.bg_card, fg=self.text_white, insertbackground="white")
-        self.url_entry.pack(fill="x", pady=5)
-        
-        self.type_var = tk.StringVar(value="Video")
-        tk.OptionMenu(self.single_view, self.type_var, "Video", "Audio").pack(fill="x", pady=5)
-        
-        tk.Button(self.single_view, text="Download", bg=self.accent_purple, fg=self.text_white, command=self.start_single_download).pack(pady=20, fill="x")
+    def update_status(self, text):
+        Clock.schedule_once(lambda dt: setattr(self.status_lbl, 'text', text))
 
-    def build_batch_layout(self):
-        tk.Label(self.batch_view, text="Create 'links.txt' in Downloads", bg=self.bg_dark, fg=self.text_dim).pack()
-        tk.Button(self.batch_view, text="Run Batch", bg=self.accent_purple, fg=self.text_white, command=self.start_batch_download).pack(pady=20, fill="x")
-
-    def show_single_view(self):
-        self.batch_view.pack_forget()
-        self.single_view.pack(fill="both", expand=True)
-
-    def show_batch_view(self):
-        self.single_view.pack_forget()
-        self.batch_view.pack(fill="both", expand=True)
-
-    # --- Core Logic & Threading ---
-    def generate_filename(self, url, ext=".mp4"):
-        return f"Download_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
-
-    def show_file_location(self):
-        messagebox.showinfo("Path", f"Files saved to: {DOWNLOAD_DIR}")
-
-    def start_single_download(self):
-        url = self.url_entry.get().strip()
+    def start_single_download(self, instance):
+        url = self.url_input.text.strip()
         if url:
-            threading.Thread(target=self.download_with_ytdl, args=(url, self.type_var.get()), daemon=True).start()
+            threading.Thread(target=self.download_ytdl, args=(url, self.type_spinner.text), daemon=True).start()
 
-    def start_batch_download(self):
-        file_path = os.path.join(DOWNLOAD_DIR, "links.txt")
-        if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
+    def start_batch_download(self, instance):
+        batch_file = os.path.join(DOWNLOAD_DIR, "links.txt")
+        if os.path.exists(batch_file):
+            with open(batch_file, 'r') as f:
                 urls = [line.strip() for line in f if line.strip()]
-                threading.Thread(target=self.process_batch, args=(urls,), daemon=True).start()
+            threading.Thread(target=self.process_batch, args=(urls,), daemon=True).start()
         else:
-            messagebox.showwarning("Error", "links.txt not found")
+            self.update_status("Error: links.txt not found in MyDownloader folder.")
 
-    def download_with_ytdl(self, url, media_type):
-        self.update_status("Starting...")
+    def download_ytdl(self, url, media_type):
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.update_status("Downloading...")
         ydl_opts = {
-            'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
-            'format': 'bestaudio/best' if media_type == "Audio" else 'bestvideo+bestaudio/best',
+            'outtmpl': f'{DOWNLOAD_DIR}/%(title)s_{timestamp}.%(ext)s',
+            'quiet': True
         }
+        if media_type == "Audio":
+            ydl_opts.update({'format': 'bestaudio/best'})
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-            self.update_status("Finished!")
-        except Exception as e:
-            self.update_status(f"Error: {e}")
+            self.update_status("✅ Download complete!")
+        except Exception:
+            self.update_status("❌ Extraction failed.")
 
     def process_batch(self, urls):
         for url in urls:
-            self.download_with_ytdl(url, "Video")
-        messagebox.showinfo("Done", "Batch finished")
+            self.download_ytdl(url, "Video")
+        self.update_status("✅ Batch processing finished!")
 
-    def update_status(self, text):
-        self.root.after(0, lambda: self.status_lbl.config(text=text))
-
-if __name__ == "__main__":
-    window = tk.Tk()
-    app = MobileDownloaderApp(window)
-    window.mainloop()
+if __name__ == '__main__':
+    ModernDownloaderApp().run()
