@@ -6,6 +6,10 @@ from flask import Flask, render_template_string, request, jsonify
 import requests
 import yt_dlp
 
+# --- New Android UI Window Import ---
+from android.runnable import run_on_ui_thread
+from jnius import autoclass
+
 DOWNLOAD_DIR = "/sdcard/Download/MyDownloader"
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
@@ -143,8 +147,20 @@ def process_batch(urls):
         process_ytdl(url, "Video")
     status_message = "✅ Batch layout tasks complete!"
 
+# --- Android Interface Threading Window Engine ---
+@run_on_ui_thread
+def create_webview():
+    activity = autoclass('org.kivy.android.PythonActivity').mActivity
+    WebView = autoclass('android.webkit.WebView')
+    WebViewClient = autoclass('android.webkit.WebViewClient')
+    
+    webview = WebView(activity)
+    webview.getSettings().setJavaScriptEnabled(True)
+    webview.setWebViewClient(WebViewClient())
+    webview.loadUrl('http://127.0.0.1:5000')
+    activity.setContentView(webview)
+
 if __name__ == '__main__':
-    # Starts an internal web app on boot that hooks into standard Android ports
-    import webbrowser
-    threading.Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
+    # Starts the local server, then anchors the visual web view frame so Android leaves it open
+    threading.Timer(1.5, create_webview).start()
     app.run(host='127.0.0.1', port=5000)
