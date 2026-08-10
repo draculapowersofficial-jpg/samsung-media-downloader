@@ -6,9 +6,8 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
 
-# Explicitly maps python3 and core mobile graphics frameworks
-requirements = python3, kivy==2.3.0, hostpython3
-android.pip_dependencies = requests yt-dlp
+# We completely remove yt-dlp and requests from here to bypass the crash!
+requirements = python3, kivy==2.3.0, hostpython3, certifi
 
 orientation = portrait
 fullscreen = 0
