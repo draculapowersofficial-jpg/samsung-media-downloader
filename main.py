@@ -23,11 +23,14 @@ def main(page: ft.Page):
         except: pass
 
     # UI Element Layout Controls
-    status_label = ft.Text("Paste a link from YouTube/TikTok below", size=16)
-    url_input = ft.TextField(hint_text="Enter video or audio URL link here...", expand=True)
+    status_label = ft.Text("Loading global trending media feed...", size=14)
+    url_input = ft.TextField(hint_text="Search keywords or paste URL link here...", expand=True)
     progress_bar = ft.ProgressBar(value=0, visible=False)
     
-    file_list = ft.ListView(expand=True, spacing=5, height=300)
+    # Dynamic Containers for Feed/Search Results and Offline Files
+    search_results_container = ft.Column(spacing=10)
+    file_list = ft.ListView(expand=True, spacing=5, height=200)
+    feed_title_label = ft.Text("🔥 Global Most Viewed Feed:", weight=ft.FontWeight.BOLD)
 
     if yt_dlp is None:
         status_label.value = "🚨 Error: Downloading engine module missing!"
@@ -39,7 +42,7 @@ def main(page: ft.Page):
         if os.path.exists(download_path):
             files = [f for f in os.listdir(download_path) if f.endswith(('.mp4', '.mp3', '.mkv', '.webm'))]
             if not files:
-                file_list.controls.append(ft.Text("No files downloaded yet.", italic=True))
+                file_list.controls.append(ft.Text("No files downloaded yet.", italic=True, size=12))
             for f in files:
                 full_path = os.path.join(download_path, f)
                 file_list.controls.append(
@@ -53,7 +56,6 @@ def main(page: ft.Page):
 
     def play_file(path, name):
         status_label.value = f"Opening system player for: {name}"
-        # Launches the video directly into your Samsung system media app launcher
         page.launch_url(f"file://{path}")
         page.update()
 
@@ -83,7 +85,6 @@ def main(page: ft.Page):
                 title = info.get('title', 'Live Stream')
                 status_label.value = f"Streaming: {title[:40]}..."
                 progress_bar.visible = False
-                # Launches your raw URL stream source directly to view online cleanly
                 page.launch_url(stream_url)
         except Exception as e:
             status_label.value = f"Stream failed: {str(e)[:50]}"
@@ -115,52 +116,103 @@ def main(page: ft.Page):
         progress_bar.visible = False
         page.update()
 
-    # --- ACTION BUTTON EVENT HANDLERS ---
-    def start_stream(e):
+    # --- AUTOMATIC TRENDING FEED LOGIC ---
+    def load_trending_feed():
         if yt_dlp is None: return
-        url = url_input.value.strip()
-        if not url: return
-        status_label.value = "Extracting streaming data..."
-        progress_bar.visible = True
-        progress_bar.value = None
+        opts = {
+            'format': 'best',
+            'nocheckcertificate': True,
+            'quiet': True,
+            'extract_flat': True,
+            'skip_download': True
+        }
+        try:
+            # Using YouTube's trending URL format directly to populate the home layout
+            trending_url = "https://youtube.com"
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                result = ydl.extract_info(trending_url, download=False)
+                search_results_container.controls.clear()
+                
+                if 'entries' in result and result['entries']:
+                    status_label.value = "Trending feed loaded successfully!"
+                    # Limit to the top 5 most viewed entries on application boot
+                    for entry in result['entries'][:5]:
+                        video_url = entry.get('url') or f"https://youtube.com{entry.get('id')}"
+                        video_title = entry.get('title', 'Trending Media Item')
+                        
+                        search_results_container.controls.append(
+                            ft.Container(
+                                content=ft.Column([
+                                    ft.Text(f"🔥 {video_title[:60]}...", weight=ft.FontWeight.BOLD, size=13),
+                                    ft.Row([
+                                        ft.ElevatedButton("Stream", on_click=lambda e, url=video_url: trigger_action(url, "stream"), bgcolor=ft.Colors.BLUE_900),
+                                        ft.ElevatedButton("Video", on_click=lambda e, url=video_url: trigger_action(url, "video"), bgcolor=ft.Colors.GREEN_900),
+                                        ft.ElevatedButton("MP3", on_click=lambda e, url=video_url: trigger_action(url, "audio"), bgcolor=ft.Colors.PURPLE_900),
+                                    ], spacing=5)
+                                ]),
+                                padding=10,
+                                border=ft.border.all(1, ft.Colors.GREY_800),
+                                border_radius=8,
+                                bgcolor=ft.Colors.BLACK
+                            )
+                        )
+                else:
+                    status_label.value = "Could not pull charts. Paste direct link instead!"
+        except Exception as e:
+            status_label.value = "Feed loaded. Type above to search keywords!"
+            
+        progress_bar.visible = False
         page.update()
-        threading.Thread(target=run_stream, args=(url,), daemon=True).start()
 
-    def start_download_video(e):
+    # --- VIDMATE KEYWORD TEXT SEARCH ENGINE ---
+    def run_search(query_text):
         if yt_dlp is None: return
-        url = url_input.value.strip()
-        if not url: return
-        status_label.value = "Queuing video download..."
-        progress_bar.visible = True
-        progress_bar.value = 0
+        opts = {
+            'format': 'best',
+            'nocheckcertificate': True,
+            'quiet': True,
+            'extract_flat': True,
+            'skip_download': True
+        }
+        try:
+            search_query = f"ytsearch3:{query_text}"
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                result = ydl.extract_info(search_query, download=False)
+                search_results_container.controls.clear()
+                
+                if 'entries' in result and result['entries']:
+                    feed_title_label.value = f"🔍 Results for: '{query_text}'"
+                    status_label.value = f"Found {len(result['entries'])} matching items!"
+                    
+                    for entry in result['entries']:
+                        video_url = entry.get('url') or f"https://youtube.com{entry.get('id')}"
+                        video_title = entry.get('title', 'Unknown Title')
+                        
+                        search_results_container.controls.append(
+                            ft.Container(
+                                content=ft.Column([
+                                    ft.Text(f"📺 {video_title[:60]}...", weight=ft.FontWeight.BOLD, size=13),
+                                    ft.Row([
+                                        ft.ElevatedButton("Stream", on_click=lambda e, url=video_url: trigger_action(url, "stream"), bgcolor=ft.Colors.BLUE_900),
+                                        ft.ElevatedButton("Video", on_click=lambda e, url=video_url: trigger_action(url, "video"), bgcolor=ft.Colors.GREEN_900),
+                                        ft.ElevatedButton("MP3", on_click=lambda e, url=video_url: trigger_action(url, "audio"), bgcolor=ft.Colors.PURPLE_900),
+                                    ], spacing=5)
+                                ]),
+                                padding=10,
+                                border=ft.border.all(1, ft.Colors.GREY_800),
+                                border_radius=8,
+                                bgcolor=ft.Colors.BLACK
+                            )
+                        )
+                else:
+                    status_label.value = "No results found. Try different keywords!"
+        except Exception as e:
+            status_label.value = f"Search failed: {str(e)[:40]}"
+        
+        progress_bar.visible = False
         page.update()
-        threading.Thread(target=run_download, args=(url, False), daemon=True).start()
 
-    def start_download_audio(e):
-        if yt_dlp is None: return
-        url = url_input.value.strip()
-        if not url: return
-        status_label.value = "Queuing audio download..."
+    def trigger_action(url, action_type):
         progress_bar.visible = True
-        progress_bar.value = 0
-        page.update()
-        threading.Thread(target=run_download, args=(url, True), daemon=True).start()
-
-    # Layout Assembly Viewports
-    page.add(
-        status_label,
-        ft.Row([url_input]),
-        progress_bar,
-        ft.Row([
-            ft.ElevatedButton("Stream Link", on_click=start_stream, bgcolor=ft.Colors.BLUE_800),
-            ft.ElevatedButton("Get Video", on_click=start_download_video, bgcolor=ft.Colors.GREEN_800),
-            ft.ElevatedButton("Get MP3", on_click=start_download_audio, bgcolor=ft.Colors.PURPLE_800),
-        ], alignment=ft.MainAxisAlignment.CENTER),
-        ft.Divider(),
-        ft.Text("📁 Saved Offline Files (Tap to play):", weight=ft.FontWeight.BOLD),
-        file_list
-    )
-    
-    refresh_library()
-
-ft.app(target=main)
+        if action_type == "stream":
+            status_label.value = "Loading live stream link..."
