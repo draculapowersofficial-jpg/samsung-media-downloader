@@ -1,22 +1,21 @@
 [app]
-title = Media Downloader Pro
-package.name = mediadownloaderpro
-package.domain = com.samsung.downloader
+title = Universal Media Downloader
+package.name = unimediadownloader
+package.domain = org.mymediaapp
 source.dir = .
-source.include_exts = py,html,css
-version = 1.0
+source.include_exts = py,png,jpg,kv,atlas
+version = 1.0.0
 
-# Using a standard web view framework instead of Kivy
-requirements = python3, hostpython3, flask, requests, yt-dlp
+# Dependencies needed inside the app
+requirements = python3,kivy==2.3.0,yt-dlp,certifi,openssl
 
 orientation = portrait
-fullscreen = 0
+fullscreen = 1
 
-android.permissions = INTERNET, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
-android.api = 33
+# Permission required to pull video links online
+android.permissions = INTERNET
+android.api = 34
 android.minapi = 21
-android.archs = arm64-v8a
+android.ndk_api = 21
 
-[buildozer]
-log_level = 2
-warn_on_root = 1
+android.accept_sdk_license = True
