@@ -23,14 +23,26 @@ def main(page: ft.Page):
         except: pass
 
     # UI Element Layout Controls
-    status_label = ft.Text("Loading global trending media feed...", size=14)
+    status_label = ft.Text("Type keywords below to search or paste a link", size=14)
     url_input = ft.TextField(hint_text="Search keywords or paste URL link here...", expand=True)
     progress_bar = ft.ProgressBar(value=0, visible=False)
+    
+    # NEW FEATURE: Quality Selection Dropdown Menu
+    quality_dropdown = ft.Dropdown(
+        label="Select Download Quality",
+        width=200,
+        value="best",
+        options=[
+            ft.dropdown.Option("best", "High Quality (Best Available)"),
+            ft.dropdown.Option("bestvideo[height<=720]+bestaudio/best", "Medium Quality (720p)"),
+            ft.dropdown.Option("worst", "Low Quality (Data Saver Mode)"),
+        ]
+    )
     
     # Dynamic Containers for Feed/Search Results and Offline Files
     search_results_container = ft.Column(spacing=10)
     file_list = ft.ListView(expand=True, spacing=5, height=200)
-    feed_title_label = ft.Text("🔥 Global Most Viewed Feed:", weight=ft.FontWeight.BOLD)
+    feed_title_label = ft.Text("🔍 Search Results / Trending Feed:", weight=ft.FontWeight.BOLD)
 
     if yt_dlp is None:
         status_label.value = "🚨 Error: Downloading engine module missing!"
@@ -91,7 +103,7 @@ def main(page: ft.Page):
             progress_bar.visible = False
         page.update()
 
-    def run_download(url, is_audio):
+    def run_download(url, is_audio, selected_quality):
         if yt_dlp is None: return
         opts = {
             'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
@@ -104,7 +116,8 @@ def main(page: ft.Page):
                 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
             })
         else:
-            opts['format'] = 'best[ext=mp4]/best'
+            # Applies the chosen quality layout from the dropdown selector
+            opts['format'] = selected_quality
             
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -116,8 +129,8 @@ def main(page: ft.Page):
         progress_bar.visible = False
         page.update()
 
-    # --- AUTOMATIC TRENDING FEED LOGIC ---
-    def load_trending_feed():
+    # --- AUTOMATIC TRENDING FEED LOGIC (CRASH SAFE) ---
+    def safe_load_initial_feed():
         if yt_dlp is None: return
         opts = {
             'format': 'best',
@@ -127,7 +140,7 @@ def main(page: ft.Page):
             'skip_download': True
         }
         try:
-            # Using YouTube's trending URL format directly to populate the home layout
+            # Wrapped inside a try/catch structure to prevent app crashes if connection lags
             trending_url = "https://youtube.com"
             with yt_dlp.YoutubeDL(opts) as ydl:
                 result = ydl.extract_info(trending_url, download=False)
@@ -135,7 +148,6 @@ def main(page: ft.Page):
                 
                 if 'entries' in result and result['entries']:
                     status_label.value = "Trending feed loaded successfully!"
-                    # Limit to the top 5 most viewed entries on application boot
                     for entry in result['entries'][:5]:
                         video_url = entry.get('url') or f"https://youtube.com{entry.get('id')}"
                         video_title = entry.get('title', 'Trending Media Item')
@@ -157,10 +169,10 @@ def main(page: ft.Page):
                             )
                         )
                 else:
-                    status_label.value = "Could not pull charts. Paste direct link instead!"
-        except Exception as e:
-            status_label.value = "Feed loaded. Type above to search keywords!"
-            
+                    status_label.value = "Ready! Use input bar above to search."
+        except Exception:
+            status_label.value = "App online! Type keywords above to search."
+        
         progress_bar.visible = False
         page.update()
 
@@ -204,15 +216,3 @@ def main(page: ft.Page):
                                 bgcolor=ft.Colors.BLACK
                             )
                         )
-                else:
-                    status_label.value = "No results found. Try different keywords!"
-        except Exception as e:
-            status_label.value = f"Search failed: {str(e)[:40]}"
-        
-        progress_bar.visible = False
-        page.update()
-
-    def trigger_action(url, action_type):
-        progress_bar.visible = True
-        if action_type == "stream":
-            status_label.value = "Loading live stream link..."
