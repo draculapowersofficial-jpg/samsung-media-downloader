@@ -1,7 +1,12 @@
 import flet as ft
 import os
 import threading
-import yt_dlp
+
+# Safely import yt-dlp so the app doesn't crash on startup if it's missing
+try:
+    import yt_dlp
+except ImportError:
+    yt_dlp = None
 
 def main(page: ft.Page):
     page.title = "Universal Media Player & Downloader"
@@ -25,6 +30,11 @@ def main(page: ft.Page):
     video_player = ft.Video(expand=True, aspect_ratio=16/9, visible=False)
     
     file_list = ft.ListView(expand=True, spacing=5, height=200)
+
+    # Check if yt-dlp successfully bundled inside the APK package
+    if yt_dlp is None:
+        status_label.value = "🚨 Error: yt-dlp module missing inside package!"
+        status_label.color = ft.Colors.RED_400
 
     # --- REFRESH DOWNLOADED LIBRARY ---
     def refresh_library():
@@ -67,6 +77,7 @@ def main(page: ft.Page):
 
     # --- CORE WORKER FUNCTIONS ---
     def run_stream(url):
+        if yt_dlp is None: return
         opts = {'format': 'best[ext=mp4]/best', 'nocheckcertificate': True, 'quiet': True}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -83,6 +94,7 @@ def main(page: ft.Page):
         page.update()
 
     def run_download(url, is_audio):
+        if yt_dlp is None: return
         opts = {
             'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
             'nocheckcertificate': True,
@@ -108,6 +120,7 @@ def main(page: ft.Page):
 
     # --- BUTTON TRIGGER EVENTS ---
     def start_stream(e):
+        if yt_dlp is None: return
         url = url_input.value.strip()
         if not url: return
         status_label.value = "Extracting link data..."
@@ -117,6 +130,7 @@ def main(page: ft.Page):
         threading.Thread(target=run_stream, args=(url,), daemon=True).start()
 
     def start_download_video(e):
+        if yt_dlp is None: return
         url = url_input.value.strip()
         if not url: return
         status_label.value = "Queuing video download..."
@@ -126,6 +140,7 @@ def main(page: ft.Page):
         threading.Thread(target=run_download, args=(url, False), daemon=True).start()
 
     def start_download_audio(e):
+        if yt_dlp is None: return
         url = url_input.value.strip()
         if not url: return
         status_label.value = "Queuing audio download..."
