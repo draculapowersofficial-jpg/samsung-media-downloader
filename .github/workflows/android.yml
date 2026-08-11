@@ -37,7 +37,7 @@ jobs:
 
     - name: Compile and Package APK
       run: |
-        flet build apk --target-platform android-arm64
+        flet build apk
 
     - name: Upload Finished APK Artifact
       uses: actions/upload-artifact@v4
