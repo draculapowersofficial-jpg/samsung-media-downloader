@@ -1,0 +1,3 @@
+android:
+  architectures:
+    - arm64-v8a
