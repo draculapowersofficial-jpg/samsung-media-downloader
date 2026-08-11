@@ -2,7 +2,6 @@ import flet as ft
 import os
 import threading
 
-# Safely import yt-dlp so the app doesn't crash on startup if it's missing
 try:
     import yt_dlp
 except ImportError:
@@ -27,13 +26,14 @@ def main(page: ft.Page):
     status_label = ft.Text("Paste a link from YouTube/TikTok below", size=16)
     url_input = ft.TextField(hint_text="Enter video or audio URL link here...", expand=True)
     progress_bar = ft.ProgressBar(value=0, visible=False)
-    video_player = ft.Video(expand=True, aspect_ratio=16/9, visible=False)
+    
+    # Robust Media Stream Viewport using WebView for absolute video compatibility
+    media_viewport = ft.WebView(url="", expand=True, height=300, visible=False)
     
     file_list = ft.ListView(expand=True, spacing=5, height=200)
 
-    # Check if yt-dlp successfully bundled inside the APK package
     if yt_dlp is None:
-        status_label.value = "🚨 Error: yt-dlp module missing inside package!"
+        status_label.value = "🚨 Error: Internal engine module missing!"
         status_label.color = ft.Colors.RED_400
 
     # --- REFRESH DOWNLOADED LIBRARY ---
@@ -56,8 +56,8 @@ def main(page: ft.Page):
 
     def play_file(path, name):
         status_label.value = f"Playing Offline: {name}"
-        video_player.visible = True
-        video_player.playlist = [ft.VideoMedia(path)]
+        media_viewport.visible = True
+        media_viewport.url = f"file://{path}"
         page.update()
 
     # --- YT-DLP HOOKS FOR THE PROGRESS BAR ---
@@ -86,8 +86,8 @@ def main(page: ft.Page):
                 title = info.get('title', 'Live Stream')
                 status_label.value = f"Streaming: {title[:40]}..."
                 progress_bar.visible = False
-                video_player.visible = True
-                video_player.playlist = [ft.VideoMedia(stream_url)]
+                media_viewport.visible = True
+                media_viewport.url = stream_url
         except Exception as e:
             status_label.value = f"Stream failed: {str(e)[:50]}"
             progress_bar.visible = False
@@ -160,7 +160,7 @@ def main(page: ft.Page):
             ft.ElevatedButton("Get MP3", on_click=start_download_audio, bgcolor=ft.Colors.PURPLE_800),
         ], alignment=ft.MainAxisAlignment.CENTER),
         ft.Divider(),
-        video_player,
+        media_viewport,
         ft.Text("📁 Offline File Library (Tap to play):", weight=ft.FontWeight.BOLD),
         file_list
     )
