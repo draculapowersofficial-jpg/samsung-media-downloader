@@ -1,166 +1,224 @@
 import os
-import re
-import datetime
 import threading
-from flask import Flask, render_template_string, request, jsonify
-import requests
-import yt_dlp
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.video import Video
+from kivy.uix.label import Label
+from kivy.uix.progressbar import ProgressBar
+from kivy.uix.scrollview import ScrollView
+from kivy.clock import Clock
+from kivy.utils import platform
 
-# --- New Android UI Window Import ---
-from android.runnable import run_on_ui_thread
-from jnius import autoclass
+try:
+    import yt_dlp
+except ImportError:
+    yt_dlp = None
 
-DOWNLOAD_DIR = "/sdcard/Download/MyDownloader"
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
+class MediaDownloaderApp(App):
+    def build(self):
+        self.title = "Universal Media Player & Downloader"
+        
+        # Base UI layout
+        self.layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        
+        # Status Label
+        self.status_label = Label(
+            text="Paste a link from YouTube/TikTok, or browse downloaded files below", 
+            size_hint_y=0.08,
+            halign="center"
+        )
+        self.layout.add_widget(self.status_label)
+        
+        # Link Input Field
+        self.url_input = TextInput(
+            hint_text="Enter video or audio URL link here...", 
+            multiline=False, 
+            size_hint_y=0.08
+        )
+        self.layout.add_widget(self.url_input)
+        
+        # Visual Progress Bar
+        self.progress_bar = ProgressBar(max=100, value=0, size_hint_y=0.04)
+        self.layout.add_widget(self.progress_bar)
+        
+        # Action Buttons for Online Links
+        self.button_layout = BoxLayout(orientation='horizontal', size_hint_y=0.08, spacing=10)
+        self.stream_btn = Button(text="Stream Link", on_press=self.start_stream)
+        self.download_video_btn = Button(text="Download Video", on_press=self.start_video_download)
+        self.download_audio_btn = Button(text="Download MP3", on_press=self.start_audio_download)
+        
+        self.button_layout.add_widget(self.stream_btn)
+        self.button_layout.add_widget(self.download_video_btn)
+        self.button_layout.add_widget(self.download_audio_btn)
+        self.layout.add_widget(self.button_layout)
+        
+        # Middle Split: Video Player (Top) & Offline File Browser (Bottom)
+        self.content_layout = BoxLayout(orientation='vertical', size_hint_y=0.72, spacing=10)
+        
+        # Native Video Player
+        self.video_player = Video(source='', state='stop', options={'eos': 'loop'}, size_hint_y=0.6)
+        self.content_layout.add_widget(self.video_player)
+        
+        # Offline File Browser container
+        self.browser_container = BoxLayout(orientation='vertical', size_hint_y=0.4, spacing=5)
+        self.browser_label = Label(text="📁 Saved Offline Files (Tap to play):", size_hint_y=0.2, halign="left")
+        self.browser_container.add_widget(self.browser_label)
+        
+        self.scroll_view = ScrollView(size_hint_y=0.8)
+        self.file_list_layout = BoxLayout(orientation='vertical', size_hint_y=None, spacing=5)
+        self.file_list_layout.bind(minimum_height=self.file_list_layout.setter('height'))
+        self.scroll_view.add_widget(self.file_list_layout)
+        self.browser_container.add_widget(self.scroll_view)
+        
+        self.content_layout.add_widget(self.browser_container)
+        self.layout.add_widget(self.content_layout)
+        
+        # Configure storage paths for your Samsung phone
+        if platform == 'android':
+            self.download_path = "/storage/emulated/0/Download/MediaDownloader"
+        else:
+            self.download_path = os.path.join(os.path.expanduser("~"), "Downloads", "MediaDownloader")
+            
+        if not os.path.exists(self.download_path):
+            try:
+                os.makedirs(self.download_path)
+            except Exception:
+                pass
 
-app = Flask(__name__)
-status_message = "Ready to download..."
+        # Load your offline downloaded library right away on startup
+        self.refresh_offline_library()
 
-# Clean Premium Dark Mode HTML/CSS Interface
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Media Downloader Pro</title>
-    <style>
-        body { background-color: #121212; color: #FFFFFF; font-family: Helvetica, Arial, sans-serif; padding: 20px; text-align: center; }
-        .container { max-width: 450px; margin: 0 auto; background: #1E1E1E; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        h1 { font-size: 24px; margin-bottom: 20px; color: #FFFFFF; }
-        input, select, button { width: 100%; padding: 12px; margin: 10px 0; border-radius: 4px; border: none; font-size: 16px; box-sizing: border-box; }
-        input, select { background-color: #2D2D2D; color: #FFFFFF; }
-        button { background-color: #6200EE; color: white; font-weight: bold; cursor: pointer; }
-        button:hover { background-color: #3700B3; }
-        .status { margin-top: 20px; color: #A0A0A0; font-style: italic; }
-        .tab-btn { width: 48%; display: inline-block; background-color: #2D2D2D; margin: 5px 1%; }
-        .active-tab { background-color: #6200EE; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Media Downloader Pro</h1>
-        <div style="margin-bottom: 20px;">
-            <button class="tab-btn active-tab" id="btn-single" onclick="showTab('single')">Single Link</button>
-            <button class="tab-btn" id="btn-batch" onclick="showTab('batch')">Batch Mode</button>
-        </div>
+        return self.layout
 
-        <div id="single-view">
-            <input type="text" id="url" placeholder="Paste your media link here...">
-            <select id="type">
-                <option value="Video">Video</option>
-                <option value="Audio">Audio</option>
-            </select>
-            <button onclick="startDownload()">DOWNLOAD NOW</button>
-        </div>
+    def update_status(self, text):
+        Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', text))
 
-        <div id="batch-view" style="display:none;">
-            <p style="color: #A0A0A0; font-size: 14px;">Place a file named 'links.txt' in your Download folder with one link per line.</p>
-            <button onclick="startBatch()">RUN BATCH FILE</button>
-        </div>
+    def update_progress(self, percent):
+        Clock.schedule_once(lambda dt: setattr(self.progress_bar, 'value', percent))
 
-        <div class="status" id="status-box">Status: Ready.</div>
-    </div>
+    # --- OFFLINE FILE BROWSER LOGIC ---
+    def refresh_offline_library(self):
+        self.file_list_layout.clear_widgets()
+        if not os.path.exists(self.download_path):
+            return
+            
+        files = [f for f in os.listdir(self.download_path) if f.endswith(('.mp4', '.mp3', '.mkv', '.webm'))]
+        
+        if not files:
+            lbl = Label(text="No files downloaded yet.", size_hint_y=None, height=40)
+            self.file_list_layout.add_widget(lbl)
+            return
 
-    <script>
-        function showTab(type) {
-            if(type === 'single') {
-                document.getElementById('single-view').style.display = 'block';
-                document.getElementById('batch-view').style.display = 'none';
-                document.getElementById('btn-single').classList.add('active-tab');
-                document.getElementById('btn-batch').classList.remove('active-tab');
-            } else {
-                document.getElementById('single-view').style.display = 'none';
-                document.getElementById('batch-view').style.display = 'block';
-                document.getElementById('btn-single').classList.remove('active-tab');
-                document.getElementById('btn-batch').classList.add('active-tab');
-            }
+        for filename in files:
+            full_path = os.path.join(self.download_path, filename)
+            btn = Button(
+                text=filename, 
+                size_hint_y=None, 
+                height=45, 
+                background_color=(0.2, 0.6, 0.8, 1),
+                halign="center"
+            )
+            btn.bind(on_press=lambda instance, path=full_path: self.play_offline_file(path))
+            self.file_list_layout.add_widget(btn)
+
+    def play_offline_file(self, file_path):
+        self.video_player.unload()
+        self.video_player.source = file_path
+        self.video_player.state = 'play'
+        filename = os.path.basename(file_path)
+        self.update_status(f"Playing Offline File: {filename}")
+
+    # --- YT-DLP HOOKS FOR REAL-TIME PROGRESS BAR ---
+    def ytdl_progress_hook(self, d):
+        if d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            downloaded = d.get('downloaded_bytes', 0)
+            if total:
+                percent = (downloaded / total) * 100
+                self.update_progress(percent)
+                self.update_status(f"Downloading... {int(percent)}%")
+        elif d['status'] == 'finished':
+            self.update_progress(100)
+            self.update_status("Processing file conversion...")
+
+    # --- ONLINE STREAMING LOGIC ---
+    def start_stream(self, instance):
+        url = self.url_input.text.strip()
+        if not url:
+            self.update_status("Error: Please paste a valid link first!")
+            return
+        self.update_status("Extracting live stream URL...")
+        self.update_progress(15)
+        threading.Thread(target=self._async_stream, args=(url,), daemon=True).start()
+
+    def _async_stream(self, url):
+        ydl_opts = {
+            'format': 'best[ext=mp4]/best', 
+            'nocheckcertificate': True,
+            'quiet': True
         }
-        function startDownload() {
-            let url = document.getElementById('url').value;
-            let type = document.getElementById('type').value;
-            document.getElementById('status-box').innerText = "Status: Initializing connection...";
-            fetch('/download?url=' + encodeURIComponent(url) + '&type=' + type)
-                .then(res => res.json())
-                .then(data => alert(data.message));
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                stream_url = info.get('url')
+                title = info.get('title', 'Video Stream')
+                
+                self.update_status(f"Streaming live: {title[:30]}...")
+                self.update_progress(100)
+                Clock.schedule_once(lambda dt: self._play_video(stream_url))
+        except Exception as e:
+            self.update_status(f"Streaming failed: {str(e)[:40]}")
+            self.update_progress(0)
+
+    def _play_video(self, stream_url):
+        self.video_player.unload()
+        self.video_player.source = stream_url
+        self.video_player.state = 'play'
+
+    # --- DOWNLOADING LOGIC ---
+    def start_video_download(self, instance):
+        url = self.url_input.text.strip()
+        if not url:
+            return
+        self.update_status("Queuing download...")
+        self.update_progress(0)
+        opts = {
+            'format': 'best[ext=mp4]/best',
+            'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
+            'nocheckcertificate': True,
+            'progress_hooks': [self.ytdl_progress_hook]
         }
-        function startBatch() {
-            document.getElementById('status-box').innerText = "Status: Starting batch processing...";
-            fetch('/batch')
-                .then(res => res.json())
-                .then(data => alert(data.message));
+        threading.Thread(target=self._async_download, args=(url, opts), daemon=True).start()
+
+    def start_audio_download(self, instance):
+        url = self.url_input.text.strip()
+        if not url:
+            return
+        self.update_status("Queuing audio download...")
+        self.update_progress(0)
+        opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
+            'nocheckcertificate': True,
+            'progress_hooks': [self.ytdl_progress_hook],
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }]
         }
-        setInterval(() => {
-            fetch('/status').then(res => res.json()).then(data => {
-                document.getElementById('status-box').innerText = "Status: " + data.status;
-            });
-        }, 2000);
-    </script>
-</body>
-</html>
-"""
+        threading.Thread(target=self._async_download, args=(url, opts), daemon=True).start()
 
-@app.route('/')
-def home():
-    return render_template_string(HTML_TEMPLATE)
-
-@app.route('/status')
-def get_status():
-    global status_message
-    return jsonify({"status": status_message})
-
-@app.route('/download')
-def download():
-    url = request.args.get('url')
-    media_type = request.args.get('type')
-    threading.Thread(target=process_ytdl, args=(url, media_type), daemon=True).start()
-    return jsonify({"message": "Download thread started in background!"})
-
-@app.route('/batch')
-def batch():
-    batch_file = os.path.join(DOWNLOAD_DIR, "links.txt")
-    if os.path.exists(batch_file):
-        with open(batch_file, 'r') as f:
-            urls = [line.strip() for line in f if line.strip()]
-        threading.Thread(target=process_batch, args=(urls,), daemon=True).start()
-        return jsonify({"message": "Batch sequence initiated!"})
-    return jsonify({"message": "Error: links.txt file not found."})
-
-def process_ytdl(url, media_type):
-    global status_message
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    status_message = "Downloading..."
-    ydl_opts = {'outtmpl': f'{DOWNLOAD_DIR}/%(title)s_{timestamp}.%(ext)s', 'quiet': True}
-    if media_type == "Audio":
-        ydl_opts.update({'format': 'bestaudio/best'})
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        status_message = "✅ Download complete!"
-    except Exception:
-        status_message = "❌ Extraction failed."
-
-def process_batch(urls):
-    global status_message
-    for url in urls:
-        process_ytdl(url, "Video")
-    status_message = "✅ Batch layout tasks complete!"
-
-# --- Android Interface Threading Window Engine ---
-@run_on_ui_thread
-def create_webview():
-    activity = autoclass('org.kivy.android.PythonActivity').mActivity
-    WebView = autoclass('android.webkit.WebView')
-    WebViewClient = autoclass('android.webkit.WebViewClient')
-    
-    webview = WebView(activity)
-    webview.getSettings().setJavaScriptEnabled(True)
-    webview.setWebViewClient(WebViewClient())
-    webview.loadUrl('http://127.0.0.1:5000')
-    activity.setContentView(webview)
+    def _async_download(self, url, opts):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+            self.update_status("Download Complete!")
+            Clock.schedule_once(lambda dt: self.refresh_offline_library())
+        except Exception as e:
+            self.update_status(f"Download failed: {str(e)[:40]}")
 
 if __name__ == '__main__':
-    # Starts the local server, then anchors the visual web view frame so Android leaves it open
-    threading.Timer(1.5, create_webview).start()
-    app.run(host='127.0.0.1', port=5000)
+    MediaDownloaderApp().run()
